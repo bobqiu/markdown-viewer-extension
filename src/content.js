@@ -2,6 +2,7 @@
 import { unified } from 'unified';
 import remarkParse from 'remark-parse';
 import remarkGfm from 'remark-gfm';
+import remarkBreaks from 'remark-breaks';
 import remarkMath from 'remark-math';
 import remarkRehype from 'remark-rehype';
 import rehypeSlug from 'rehype-slug';
@@ -232,20 +233,44 @@ function generateAsyncId() {
 }
 
 /**
- * Register async task for later execution
+ * Register async task for later execution with status management
  * @param {Function} callback - The async callback function
  * @param {Object} data - Data to pass to callback
  * @param {string} type - Type for placeholder styling ('mermaid', 'html', 'svg')
  * @param {string} description - Optional description for placeholder
- * @returns {Object} - HTML node object with placeholder content
+ * @param {string} initialStatus - Initial task status ('ready', 'fetching')
+ * @returns {Object} - Object with task control and placeholder content
  */
-function asyncTask(callback, data = {}, type = 'unknown', description = '') {
+function asyncTask(callback, data = {}, type = 'unknown', description = '', initialStatus = 'ready') {
   const placeholderId = generateAsyncId();
-  asyncTaskQueue.push({ callback, data: { ...data, id: placeholderId } });
+  
+  // Create task object with status management
+  const task = {
+    id: placeholderId,
+    callback,
+    data: { ...data, id: placeholderId },
+    type,
+    status: initialStatus, // 'ready', 'fetching', 'error'
+    error: null,
+    
+    // Methods for business logic to update status
+    setReady: () => {
+      task.status = 'ready';
+    },
+    setError: (error) => {
+      task.status = 'error';
+      task.error = error;
+    }
+  };
+  
+  asyncTaskQueue.push(task);
   
   return {
-    type: 'html',
-    value: createAsyncPlaceholder(placeholderId, type, description)
+    task, // Return task object for business logic control
+    placeholder: {
+      type: 'html',
+      value: createAsyncPlaceholder(placeholderId, type, description)
+    }
   };
 }
 
@@ -259,6 +284,17 @@ function createAsyncPlaceholder(id, type, description = '') {
     'svg': 'SVG 图像'
   };
   
+  // SVG images should use inline placeholders to preserve text flow
+  if (type === 'svg') {
+    return `<span id="${id}" class="async-placeholder ${type}-placeholder inline-placeholder">
+      <span class="async-loading">
+        <span class="async-spinner"></span>
+        <span class="async-text">${typeLabels[type] || type}${description ? ': ' + description : ''}</span>
+      </span>
+    </span>`;
+  }
+  
+  // Other content types use block placeholders
   return `<div id="${id}" class="async-placeholder ${type}-placeholder">
     <div class="async-loading">
       <div class="async-spinner"></div>
@@ -268,46 +304,81 @@ function createAsyncPlaceholder(id, type, description = '') {
 }
 
 /**
- * Process all async tasks in queue sequentially (one by one)
+ * Process all async tasks with prioritized handling
+ * Priority: ready > error > fetching (wait for fetching tasks)
  */
 async function processAsyncTasks() {
   if (asyncTaskQueue.length === 0) {
+    console.log('No async tasks to process');
     return;
   }
   
   const totalTasks = asyncTaskQueue.length;
+  console.log(`Processing ${totalTasks} async tasks`);
   
-  // Show processing indicator and set initial progress (full circle)
+  // Show processing indicator and set initial progress
   showProcessingIndicator();
-  updateProgress(0, totalTasks); // 0 completed out of totalTasks
+  updateProgress(0, totalTasks);
   
-  // Process tasks one by one to avoid offscreen document conflicts
   let completedTasks = 0;
+  
+  // Process tasks with priority: ready/error first, then wait for fetching
   while (asyncTaskQueue.length > 0) {
-    const taskInfo = asyncTaskQueue.shift();
-    try {
-      if (typeof taskInfo === 'function') {
-        // Legacy support for direct function callbacks
-        await Promise.resolve().then(taskInfo);
-      } else {
-        // New format with data
-        await Promise.resolve().then(() => taskInfo.callback(taskInfo.data));
+    // Find tasks that are ready to process (ready or error status)
+    let readyTaskIndex = asyncTaskQueue.findIndex(task => 
+      task.status === 'ready' || task.status === 'error'
+    );
+    
+    if (readyTaskIndex !== -1) {
+      // Process ready/error task
+      const task = asyncTaskQueue.splice(readyTaskIndex, 1)[0];
+      
+      try {
+        if (task.status === 'error') {
+          // Handle error case - update placeholder with error message
+          const placeholder = document.getElementById(task.id);
+          if (placeholder) {
+            const errorMessage = task.error ? task.error.message : 'Unknown error';
+            placeholder.outerHTML = `<pre style="background: #fee; border-left: 4px solid #f00; padding: 10px; font-size: 12px;">处理错误: ${escapeHtml(errorMessage)}</pre>`;
+          }
+        } else {
+          // Process ready task normally
+          await Promise.resolve().then(() => task.callback(task.data));
+        }
+        
+        completedTasks++;
+        updateProgress(completedTasks, totalTasks);
+        
+      } catch (error) {
+        console.error('Async task processing error:', error);
+        // Update placeholder with error message
+        const placeholder = document.getElementById(task.id);
+        if (placeholder) {
+          placeholder.outerHTML = `<pre style="background: #fee; border-left: 4px solid #f00; padding: 10px; font-size: 12px;">任务处理错误: ${escapeHtml(error.message)}</pre>`;
+        }
+        
+        completedTasks++;
+        updateProgress(completedTasks, totalTasks);
+      }
+    } else {
+      // All remaining tasks are fetching, wait a bit and check again
+      const fetchingTasks = asyncTaskQueue.filter(task => task.status === 'fetching');
+      
+      if (fetchingTasks.length === 0) {
+        // No more tasks to process (shouldn't happen), break the loop
+        console.warn('No ready or fetching tasks found, breaking loop');
+        break;
       }
       
-      // Update progress after each task completion
-      completedTasks++;
-      updateProgress(completedTasks, totalTasks);
-      
-    } catch (error) {
-      console.error('Async task error:', error);
-      // Still count as completed to maintain progress accuracy
-      completedTasks++;
-      updateProgress(completedTasks, totalTasks);
+      console.log(`Waiting for ${fetchingTasks.length} fetching tasks...`);
+      // Wait 100ms before checking again
+      await new Promise(resolve => setTimeout(resolve, 100));
     }
   }
   
   // Hide processing indicator when all tasks are done
   hideProcessingIndicator();
+  console.log('All async tasks completed');
 }
 
 /**
@@ -325,15 +396,37 @@ function updateProgress(completed, total) {
   const offset = circumference * (1 - progress);
   
   progressCircle.style.strokeDashoffset = offset;
+  
+  console.log(`Progress: ${completed}/${total} (${Math.round(progress * 100)}%)`);
 }
 
 /**
  * Show processing indicator in TOC header
  */
 function showProcessingIndicator() {
+  console.log('Attempting to show processing indicator...');
+  
+  // Debug: check if the elements exist
+  const tocDiv = document.getElementById('table-of-contents');
+  const tocHeader = document.querySelector('.toc-header');
   const indicator = document.getElementById('processing-indicator');
+  
+  console.log('TOC div exists:', !!tocDiv);
+  console.log('TOC header exists:', !!tocHeader);
+  console.log('Processing indicator exists:', !!indicator);
+  
+  if (tocHeader) {
+    console.log('TOC header HTML:', tocHeader.innerHTML);
+  }
+  
   if (indicator) {
+    console.log('Showing processing indicator');
     indicator.classList.remove('hidden');
+  } else {
+    console.log('Processing indicator element not found');
+    // Try to find it by class
+    const indicatorByClass = document.querySelector('.processing-indicator');
+    console.log('Indicator by class exists:', !!indicatorByClass);
   }
 }
 
@@ -343,7 +436,10 @@ function showProcessingIndicator() {
 function hideProcessingIndicator() {
   const indicator = document.getElementById('processing-indicator');
   if (indicator) {
+    console.log('Hiding processing indicator');
     indicator.classList.add('hidden');
+  } else {
+    console.log('Processing indicator element not found');
   }
 }/**
  * Remark plugin to convert Mermaid code blocks to PNG (async callback version)
@@ -354,15 +450,16 @@ function remarkMermaidToPng(renderer) {
       // Collect all mermaid code blocks
       visit(tree, 'code', (node, index, parent) => {
         if (node.lang === 'mermaid') {
-          // Replace code block with async task placeholder immediately
-          parent.children[index] = asyncTask(async (data) => {
+          // Create async task for Mermaid processing
+          // Mermaid code is embedded data, so it's ready immediately
+          const result = asyncTask(async (data) => {
             const { id, code } = data;
             try {
               const pngBase64 = await renderer.renderMermaidToPng(code);
               const placeholder = document.getElementById(id);
               if (placeholder) {
                 placeholder.outerHTML = `<div class="mermaid-diagram" style="text-align: center; margin: 20px 0;">
-                  <img src="data:image/png;base64,${pngBase64}" alt="Mermaid diagram" style="max-width: 100%; height: auto;" />
+                  <img src="data:image/png;base64,${pngBase64}" alt="Mermaid diagram" />
                 </div>`;
               }
             } catch (error) {
@@ -371,7 +468,10 @@ function remarkMermaidToPng(renderer) {
                 placeholder.outerHTML = `<pre style="background: #fee; border-left: 4px solid #f00; padding: 10px; font-size: 12px;">Mermaid Error: ${escapeHtml(error.message)}</pre>`;
               }
             }
-          }, { code: node.value }, 'mermaid');
+          }, { code: node.value }, 'mermaid', '', 'ready'); // Embedded code is ready immediately
+          
+          // Replace code block with placeholder
+          parent.children[index] = result.placeholder;
         }
       });
     };
@@ -390,15 +490,16 @@ function remarkHtmlToPng(renderer) {
         
         // Check if it's a significant HTML block
         if ((htmlContent.startsWith('<div') || htmlContent.startsWith('<table') || htmlContent.startsWith('<svg')) && htmlContent.length > 100) {
-          // Replace HTML node with async task placeholder immediately
-          parent.children[index] = asyncTask(async (data) => {
+          // Create async task for HTML processing
+          // HTML code is embedded data, so it's ready immediately
+          const result = asyncTask(async (data) => {
             const { id, code } = data;
             try {
               const pngBase64 = await renderer.renderHtmlToPng(code);
               const placeholder = document.getElementById(id);
               if (placeholder) {
                 placeholder.outerHTML = `<div class="html-diagram" style="text-align: center; margin: 20px 0;">
-                  <img src="data:image/png;base64,${pngBase64}" alt="HTML diagram" style="max-width: 100%; height: auto;" />
+                  <img src="data:image/png;base64,${pngBase64}" alt="HTML diagram" />
                 </div>`;
               }
             } catch (error) {
@@ -407,7 +508,10 @@ function remarkHtmlToPng(renderer) {
                 placeholder.outerHTML = `<pre style="background: #fee; border-left: 4px solid #f00; padding: 10px; font-size: 12px;">HTML转换错误: ${escapeHtml(error.message)}</pre>`;
               }
             }
-          }, { code: node.value }, 'html');
+          }, { code: node.value }, 'html', '', 'ready'); // Embedded code is ready immediately
+          
+          // Replace HTML node with placeholder
+          parent.children[index] = result.placeholder;
         }
       });
     };
@@ -415,7 +519,7 @@ function remarkHtmlToPng(renderer) {
 }
 
 /**
- * Process HTML to convert SVG images to PNG (async callback version)
+ * Process HTML to convert SVG images to PNG with intelligent resource handling
  */
 async function processSvgImages(html, renderer) {
   const imgRegex = /<img\s+[^>]*src="([^"]+\.svg)"[^>]*>/gi;
@@ -440,58 +544,92 @@ async function processSvgImages(html, renderer) {
     const { fullMatch, src } = matches[i];
     const fileName = src.split('/').pop();
     
-    // Create async task manually (since this is in HTML processing, not AST)
-    const placeholderId = generateAsyncId();
-    asyncTaskQueue.push({ 
-      callback: async (data) => {
-        const { id, src, originalTag } = data;
-        try {
-          // Fetch SVG content
-          let svgContent;
-          if (src.startsWith('http://') || src.startsWith('https://')) {
-            const response = await fetch(src);
+    // Determine initial status: data: URLs are ready, everything else needs fetching
+    const initialStatus = src.startsWith('data:') ? 'ready' : 'fetching';
+    
+    // For data: URLs, parse SVG content immediately
+    let initialSvgContent = null;
+    if (src.startsWith('data:')) {
+      const base64Match = src.match(/^data:image\/svg\+xml;base64,(.+)$/);
+      if (base64Match) {
+        initialSvgContent = atob(base64Match[1]);
+      } else {
+        // Try URL encoded format
+        const urlMatch = src.match(/^data:image\/svg\+xml[;,](.+)$/);
+        if (urlMatch) {
+          initialSvgContent = decodeURIComponent(urlMatch[1]);
+        } else {
+          // Handle unsupported format - this will be caught in the callback
+          initialSvgContent = null;
+        }
+      }
+    }
+    
+    // Create async task with appropriate status
+    const result = asyncTask(async (data) => {
+      const { id, src, originalTag, svgContent } = data;
+      try {
+        if (!svgContent) {
+          throw new Error('No SVG content available');
+        }
+        
+        const pngBase64 = await renderer.renderSvgToPng(svgContent);
+        const placeholder = document.getElementById(id);
+        if (placeholder) {
+          placeholder.outerHTML = `<div class="svg-diagram" style="text-align: center; margin: 20px 0;">
+            <img src="data:image/png;base64,${pngBase64}" alt="SVG diagram" />
+          </div>`;
+        }
+      } catch (error) {
+        const placeholder = document.getElementById(id);
+        if (placeholder) {
+          placeholder.outerHTML = `<pre style="background: #fee; border-left: 4px solid #f00; padding: 10px; font-size: 12px;">SVG Error: Cannot load file "${escapeHtml(src)}" - ${escapeHtml(error.message)}</pre>`;
+        }
+      }
+    }, { src: src, originalTag: fullMatch, svgContent: initialSvgContent }, 'svg', fileName, initialStatus);
+    
+    // For fetching resources, start the fetch process immediately
+    if (initialStatus === 'fetching') {
+      if (src.startsWith('http://') || src.startsWith('https://')) {
+        // Fetch remote resource
+        fetch(src)
+          .then(response => {
             if (!response.ok) {
               throw new Error(`HTTP ${response.status}: ${response.statusText}`);
             }
-            svgContent = await response.text();
-          } else {
-            // For local files, use extension background
-            const baseUrl = window.location.href;
-            const absoluteUrl = new URL(src, baseUrl).href;
-            
-            const response = await chrome.runtime.sendMessage({
-              type: 'READ_LOCAL_FILE',
-              filePath: absoluteUrl
-            });
-            
-            if (response.error) {
-              throw new Error(response.error);
-            }
-            
-            svgContent = response.content;
+            return response.text();
+          })
+          .then(content => {
+            result.task.data.svgContent = content;
+            result.task.setReady();
+          })
+          .catch(error => {
+            result.task.setError(error);
+          });
+      } else {
+        // Fetch local file
+        const baseUrl = window.location.href;
+        const absoluteUrl = new URL(src, baseUrl).href;
+        
+        chrome.runtime.sendMessage({
+          type: 'READ_LOCAL_FILE',
+          filePath: absoluteUrl
+        })
+        .then(response => {
+          if (response.error) {
+            throw new Error(response.error);
           }
-          
-          const pngBase64 = await renderer.renderSvgToPng(svgContent);
-          const placeholder = document.getElementById(id);
-          if (placeholder) {
-            const newImgTag = originalTag.replace(/src="[^"]+"/, `src="data:image/png;base64,${pngBase64}"`);
-            placeholder.outerHTML = newImgTag;
-          }
-        } catch (error) {
-          const placeholder = document.getElementById(id);
-          if (placeholder) {
-            placeholder.outerHTML = `<pre style="background: #fee; border-left: 4px solid #f00; padding: 10px; font-size: 12px;">SVG Error: Cannot load file "${escapeHtml(src)}" - ${escapeHtml(error.message)}</pre>`;
-          }
-        }
-      }, 
-      data: { id: placeholderId, src: src, originalTag: fullMatch }
-    });
-    
-    // Create placeholder
-    const placeholder = createAsyncPlaceholder(placeholderId, 'svg', fileName);
+          result.task.data.svgContent = response.content;
+          result.task.setReady();
+        })
+        .catch(error => {
+          result.task.setError(error);
+        });
+      }
+    }
     
     // Replace the image tag with placeholder
-    html = html.substring(0, matches[i].index) + placeholder + html.substring(matches[i].index + fullMatch.length);
+    html = html.substring(0, matches[i].index) + result.placeholder.value + html.substring(matches[i].index + fullMatch.length);
   }
   
   return html;
@@ -645,6 +783,7 @@ setTimeout(async () => {
   // Now that all DOM is ready, process async tasks
   // Add a small delay to ensure DOM is fully rendered and visible
   setTimeout(() => {
+    console.log('Starting async task processing...');
     processAsyncTasks();
   }, 200);
 }, 100);
@@ -690,6 +829,7 @@ async function renderMarkdown(markdown, savedScrollPosition = 0) {
     const processor = unified()
       .use(remarkParse)
       .use(remarkGfm)
+      .use(remarkBreaks) // Add line break processing
       .use(remarkMath)
       .use(remarkHtmlToPng(renderer)) // Add HTML processing FIRST
       .use(remarkMermaidToPng(renderer)) // Add Mermaid processing AFTER HTML
@@ -781,9 +921,9 @@ function setupTocToggle() {
     overlayDiv.classList.toggle('hidden');
   };
 
-  // Use keyboard shortcut (Ctrl+B or Cmd+B) to toggle TOC
+  // Use keyboard shortcut (Ctrl+T or Cmd+T) to toggle TOC
   document.addEventListener('keydown', (e) => {
-    if ((e.ctrlKey || e.metaKey) && e.key === 'b') {
+    if ((e.ctrlKey || e.metaKey) && e.key === 't') {
       e.preventDefault();
       toggleToc();
     }

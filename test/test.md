@@ -7,14 +7,13 @@
 本测试文档按照功能复杂度和重要性进行组织：
 
 1. **基础语法** - Markdown核心语法测试
-2. **文本格式** - 格式化和特殊字符
+2. **文本格式** - 格式化、特殊字符和换行处理
 3. **列表和表格** - 结构化内容
 4. **代码语法高亮** - 多语言代码支持
 5. **数学公式** - KaTeX数学渲染
 6. **图表和图像** - Mermaid图表和SVG处理
-7. **HTML混合内容** - 复杂布局测试
-8. **错误处理** - 边界情况和异常
-9. **测试总结** - 功能覆盖清单
+7. **错误处理** - 边界情况和异常
+8. **测试总结** - 功能覆盖清单
 
 ---
 
@@ -73,7 +72,42 @@ ___
 
 Emoji测试：😀 🎉 🚀 ✅ ❌ 🔥 💡 📝
 
-### 2.3 转义字符测试
+### 2.3 换行处理测试（remark-breaks 功能）
+**单行换行测试：**
+这是第一行文本
+这是第二行文本，应该与第一行换行显示
+这是第三行文本，也应该换行显示
+
+**段落内混合格式换行：**
+**粗体文本**
+普通文本，应该换行
+*斜体文本*，继续换行
+`代码文本`，继续换行
+~~删除线文本~~，最后一行
+
+**引用块内换行：**
+> 引用的第一行
+> 引用的第二行，应该换行
+> 引用的第三行
+
+**列表项内换行：**
+- 列表项标题
+  第一行详细说明
+  第二行详细说明，应该换行
+  第三行详细说明
+
+- 另一个列表项
+  包含多行的说明文字
+  每行都应该正确换行显示
+
+**长段落换行测试：**
+这是一个测试 remark-breaks 插件功能的长段落。
+在传统的 Markdown 中，单个换行符不会产生换行效果。
+但是添加了 remark-breaks 插件后，每个换行符都会转换为 HTML 的 <br> 标签。
+这样就可以实现更自然的换行显示效果。
+不再需要在每行末尾添加两个空格来实现换行。
+
+### 2.4 转义字符测试
 \*不是斜体\*  
 \`不是代码\`  
 \# 不是标题  
@@ -803,94 +837,56 @@ gantt
 **功能测试 SVG：**
 ![SVG功能测试](./test-features.svg)
 
+**Data URL SVG 测试（应该立即渲染）：**
+
+![简单几何形状](data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjAwIiBoZWlnaHQ9IjEwMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KICA8cmVjdCB4PSIxMCIgeT0iMTAiIHdpZHRoPSI4MCIgaGVpZ2h0PSI0MCIgZmlsbD0iIzMzNzNkYyIgcng9IjUiLz4KICA8Y2lyY2xlIGN4PSIxNTAiIGN5PSIzMCIgcj0iMjAiIGZpbGw9IiNlZjQ0NDQiLz4KICA8dGV4dCB4PSIxMCIgeT0iODAiIGZvbnQtZmFtaWx5PSJBcmlhbCIgZm9udC1zaXplPSIxNCIgZmlsbD0iIzM3NDE1MSI+RGF0YSBVUkwgU1ZHIFRlc3Q8L3RleHQ+Cjwvc3ZnPg==)
+
+![彩色图标](data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTIwIiBoZWlnaHQ9IjEyMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KICA8ZGVmcz4KICAgIDxsaW5lYXJHcmFkaWVudCBpZD0iZ3JhZCIgeDE9IjAlIiB5MT0iMCUiIHgyPSIxMDAlIiB5Mj0iMTAwJSI+CiAgICAgIDxzdG9wIG9mZnNldD0iMCUiIHN0b3AtY29sb3I9IiM2NjdlZWEiLz4KICAgICAgPHN0b3Agb2Zmc2V0PSIxMDAlIiBzdG9wLWNvbG9yPSIjNjRiM2Y0Ii8+CiAgICA8L2xpbmVhckdyYWRpZW50PgogIDwvZGVmcz4KICA8Y2lyY2xlIGN4PSI2MCIgY3k9IjYwIiByPSI1MCIgZmlsbD0idXJsKCNncmFkKSIgc3Ryb2tlPSIjZmZmZmZmIiBzdHJva2Utd2lkdGg9IjQiLz4KICA8cGF0aCBkPSJNNDAgNjAgTDU1IDc1IEw4NSA0NSIgc3Ryb2tlPSIjZmZmZmZmIiBzdHJva2Utd2lkdGg9IjYiIGZpbGw9Im5vbmUiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCIvPgo8L3N2Zz4=)
+
+**URL编码格式测试：**
+
+![URL编码SVG](data:image/svg+xml,%3Csvg%20width%3D%2280%22%20height%3D%2280%22%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%3E%3Crect%20x%3D%2210%22%20y%3D%2210%22%20width%3D%2260%22%20height%3D%2260%22%20fill%3D%22%23f97316%22%20rx%3D%2210%22/%3E%3Ctext%20x%3D%2240%22%20y%3D%2250%22%20text-anchor%3D%22middle%22%20font-family%3D%22Arial%22%20font-size%3D%2220%22%20fill%3D%22white%22%3EURL%3C/text%3E%3C/svg%3E)
+
+**复杂 Data URL SVG（测试解析能力）：**
+
+![简化数据图表](data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjUwIiBoZWlnaHQ9IjE1MCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KICA8IS0tIEJhY2tncm91bmQgLS0+CiAgPHJlY3Qgd2lkdGg9IjI1MCIgaGVpZ2h0PSIxNTAiIGZpbGw9IiNmOWZhZmMiIHJ4PSI4Ii8+CiAgPCEtLSBUaXRsZSAtLT4KICA8dGV4dCB4PSIxMjUiIHk9IjIwIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmb250LWZhbWlseT0iQXJpYWwiIGZvbnQtc2l6ZT0iMTQiIGZvbnQtd2VpZ2h0PSJib2xkIiBmaWxsPSIjMzc0MTUxIj5TYWxlcyBEYXRhPC90ZXh0PgogIDwhLS0gQmFycyAtLT4KICA8cmVjdCB4PSI0MCIgeT0iMTAwIiB3aWR0aD0iMjAiIGhlaWdodD0iMzAiIGZpbGw9IiMzNGQ5OTkiLz4KICA8cmVjdCB4PSI4MCIgeT0iODAiIHdpZHRoPSIyMCIgaGVpZ2h0PSI1MCIgZmlsbD0iIzM0ZDk5OSIvPgogIDxyZWN0IHg9IjEyMCIgeT0iNjAiIHdpZHRoPSIyMCIgaGVpZ2h0PSI3MCIgZmlsbD0iIzM0ZDk5OSIvPgogIDxyZWN0IHg9IjE2MCIgeT0iNzAiIHdpZHRoPSIyMCIgaGVpZ2h0PSI2MCIgZmlsbD0iIzM0ZDk5OSIvPgogIDwhLS0gQXhpcyAtLT4KICA8bGluZSB4MT0iMzAiIHkxPSIxMzAiIHgyPSIyMDAiIHkyPSIxMzAiIHN0cm9rZT0iI2Q5ZDlkOSIgc3Ryb2tlLXdpZHRoPSIyIi8+Cjwvc3ZnPg==)
+
 **错误处理测试：**
 ![不存在的本地SVG](./missing-local.svg)
 ![不存在的网络SVG](https://example.com/404.svg)
 
-**SVG 与其他内容混合：**
-文本内容 ![内联SVG](./test-features.svg) 和更多文本。
+### 6.6 内联测试
+
+**问题演示：应该内联显示但显示为独立块的 SVG**
+
+这是一段文本，中间插入小图标 ![信息图标](./small-icon.svg) 应该与文本在同一行。
+
+测试各种小尺寸本地 SVG 文件的内联显示：
+- 信息图标：![信息](./small-icon.svg) 16x16 像素 
+- 成功图标：![成功](./check-icon.svg) 18x18 像素
+- 箭头图标：![箭头](./arrow-down.svg) 14x14 像素
+
+这些小图标应该像普通的表情符号一样在文本行中显示，而不是作为独立的块级元素。
+
+**混合文本测试：**
+请注意：在操作成功时会显示 ![成功](./check-icon.svg) 图标，点击 ![箭头](./arrow-down.svg) 展开更多信息，需要帮助时查看 ![信息](./small-icon.svg) 提示。
 
 ---
 
-## 7. HTML 混合内容测试
+## 7. 错误处理和边界情况
 
-### 7.1 数据面板组件
-<div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 20px; border-radius: 10px; color: white; margin: 20px 0;">
-  <div style="display: flex; align-items: center; margin-bottom: 15px;">
-    <div style="background: rgba(255,255,255,0.2); border-radius: 50%; width: 60px; height: 60px; display: flex; align-items: center; justify-content: center; margin-right: 15px;">
-      <span style="font-size: 24px;">📊</span>
-    </div>
-    <div>
-      <h3 style="margin: 0; color: #fff;">数据可视化面板</h3>
-      <p style="margin: 5px 0 0 0; opacity: 0.9;">实时数据监控与分析</p>
-    </div>
-  </div>
-  
-  <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; margin-top: 20px;">
-    <div style="background: rgba(255,255,255,0.1); padding: 15px; border-radius: 8px; text-align: center;">
-      <div style="font-size: 28px; font-weight: bold; color: #4ade80;">2,486</div>
-      <div style="font-size: 12px; opacity: 0.8;">活跃用户</div>
-    </div>
-    <div style="background: rgba(255,255,255,0.1); padding: 15px; border-radius: 8px; text-align: center;">
-      <div style="font-size: 28px; font-weight: bold; color: #fbbf24;">98.5%</div>
-      <div style="font-size: 12px; opacity: 0.8;">系统可用性</div>
-    </div>
-    <div style="background: rgba(255,255,255,0.1); padding: 15px; border-radius: 8px; text-align: center;">
-      <div style="font-size: 28px; font-weight: bold; color: #f87171;">12.3s</div>
-      <div style="font-size: 12px; opacity: 0.8;">平均响应时间</div>
-    </div>
-  </div>
-</div>
-
-### 7.2 折叠内容组件
-<details style="background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; margin: 10px 0;">
-<summary style="padding: 15px; cursor: pointer; background: #f3f4f6; font-weight: 600; color: #374151;">📋 点击展开详细配置</summary>
-<div style="padding: 20px;">
-<h5 style="margin: 0 0 15px 0; color: #111827;">系统配置参数</h5>
-<table style="width: 100%; border-collapse: collapse; font-size: 14px;">
-  <thead>
-    <tr style="background: #f9fafb;">
-      <th style="border: 1px solid #e5e7eb; padding: 10px; text-align: left;">参数名称</th>
-      <th style="border: 1px solid #e5e7eb; padding: 10px; text-align: left;">当前值</th>
-      <th style="border: 1px solid #e5e7eb; padding: 10px; text-align: left;">描述</th>
-    </tr>
-  </thead>
-  <tbody>
-    <tr>
-      <td style="border: 1px solid #e5e7eb; padding: 10px;"><code>max_connections</code></td>
-      <td style="border: 1px solid #e5e7eb; padding: 10px;">1000</td>
-      <td style="border: 1px solid #e5e7eb; padding: 10px;">最大并发连接数</td>
-    </tr>
-    <tr style="background: #f9fafb;">
-      <td style="border: 1px solid #e5e7eb; padding: 10px;"><code>timeout</code></td>
-      <td style="border: 1px solid #e5e7eb; padding: 10px;">30s</td>
-      <td style="border: 1px solid #e5e7eb; padding: 10px;">请求超时时间</td>
-    </tr>
-  </tbody>
-</table>
-<div style="margin-top: 20px; padding: 15px; background: #fef3c7; border-left: 4px solid #f59e0b; border-radius: 4px;">
-  <strong style="color: #92400e;">⚠️ 注意事项：</strong>
-  <p style="margin: 5px 0 0 0; color: #92400e;">修改这些参数前请确保了解其对系统性能的影响。</p>
-</div>
-</div>
-</details>
-
----
-
-## 8. 错误处理和边界情况
-
-### 8.1 错误的 Mermaid 语法
+### 7.1 错误的 Mermaid 语法
 ```mermaid
 invalid syntax here
 this should show an error message
 ```
 
-### 8.2 错误的数学公式
+### 7.2 错误的数学公式
 $$
 \invalid{command}
 $$
 
-### 8.3 空代码块测试
+### 7.3 空代码块测试
 ```javascript
 ```
 
@@ -901,7 +897,7 @@ $$
 无语言指定的空代码块
 ```
 
-### 8.4 极端情况测试
+### 7.4 极端情况测试
 **超长文本行测试：**
 这是一个非常长的文本行，用于测试文本的自动换行和布局处理能力，包含中文字符和English characters以及123数字和!@#$%^&*()特殊符号，目的是验证在各种复杂情况下的渲染效果。
 
@@ -915,15 +911,16 @@ $$
 
 ---
 
-## 9. 测试总结
+## 8. 测试总结
 
-### 9.1 功能覆盖清单
+### 8.1 功能覆盖清单
 
 这个测试文档全面覆盖了Markdown Viewer Extension的所有核心功能：
 
 #### ✅ 基础功能
 - **Markdown语法** - 标题、文本格式、链接、图片
 - **扩展语法** - GFM（GitHub Flavored Markdown）
+- **换行处理** - remark-breaks 自动换行功能
 - **列表处理** - 标准和非标准列表的规范化
 - **表格渲染** - 基础和对齐表格
 - **特殊字符** - Unicode、转义字符、Emoji
@@ -941,7 +938,7 @@ $$
 - **响应式设计** - 支持不同屏幕尺寸
 - **目录生成** - 自动生成文档导航
 
-### 9.2 使用说明
+### 8.2 使用说明
 
 1. **测试方法**：在Chrome浏览器中安装扩展后，打开此测试文件
 2. **验证要点**：
@@ -953,7 +950,7 @@ $$
 
 3. **性能测试**：观察大型文档的加载和渲染速度
 
-### 9.3 已知限制
+### 8.3 已知限制
 
 - SVG处理仅支持本地文件和公共网络资源
 - Mermaid渲染需要网络连接（首次加载）
