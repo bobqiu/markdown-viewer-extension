@@ -4,25 +4,46 @@ import path from 'path';
 
 const copyDirectory = (sourceDir, targetDir) => {
   if (!fs.existsSync(sourceDir)) {
-    return;
+    return [];
   }
 
+  const toCopy = [];
+  const entries = fs.readdirSync(sourceDir, { withFileTypes: true });
+
+  for (const entry of entries) {
+    const entryName = typeof entry === 'string' ? entry : entry.name;
+    const sourcePath = path.join(sourceDir, entryName);
+    const targetPath = path.join(targetDir, entryName);
+
+    const isDirectory = typeof entry === 'object' && typeof entry.isDirectory === 'function'
+      ? entry.isDirectory()
+      : fs.statSync(sourcePath).isDirectory();
+
+    if (isDirectory) {
+      toCopy.push(...copyDirectory(sourcePath, targetPath));
+    } else {
+      toCopy.push({ src: sourcePath, dest: targetPath });
+    }
+  }
+
+  return toCopy;
+};
+
+const copyFileIfExists = (sourcePath, targetPath, logMessage) => {
+  if (!fs.existsSync(sourcePath)) {
+    return false;
+  }
+
+  const targetDir = path.dirname(targetPath);
   if (!fs.existsSync(targetDir)) {
     fs.mkdirSync(targetDir, { recursive: true });
   }
 
-  const entries = fs.readdirSync(sourceDir);
-  for (const entryName of entries) {
-    const sourcePath = path.join(sourceDir, entryName);
-    const targetPath = path.join(targetDir, entryName);
-
-    const stats = fs.statSync(sourcePath);
-    if (stats.isDirectory()) {
-      copyDirectory(sourcePath, targetPath);
-    } else {
-      fs.copyFileSync(sourcePath, targetPath);
-    }
+  fs.copyFileSync(sourcePath, targetPath);
+  if (logMessage) {
+    console.log(logMessage);
   }
+  return true;
 };
 
 export const createBuildConfig = () => {
@@ -66,78 +87,35 @@ export const createBuildConfig = () => {
         setup(build) {
           build.onEnd(() => {
             try {
-              // 1. Copy manifest.json from src/ to dist/
-              if (fs.existsSync('src/manifest.json')) {
-                fs.copyFileSync('src/manifest.json', 'dist/manifest.json');
-                console.log('📄 Copied manifest.json from src/');
-              }
-              
-              // 2. Copy icons to dist/
-              if (fs.existsSync('icons')) {
-                const iconsDir = 'dist/icons';
-                if (!fs.existsSync(iconsDir)) {
-                  fs.mkdirSync(iconsDir, { recursive: true });
-                }
-                const iconFiles = fs.readdirSync('icons');
-                for (const iconFile of iconFiles) {
-                  fs.copyFileSync(path.join('icons', iconFile), path.join(iconsDir, iconFile));
-                }
-                console.log('📄 Copied icons/');
-              }
-              
-              // 3. Copy popup HTML files to dist/
-              if (fs.existsSync('src/popup.html')) {
-                fs.copyFileSync('src/popup.html', 'dist/popup.html');
-              }
-              
-              // 4. Copy offscreen HTML files to dist/
-              if (fs.existsSync('src/offscreen.html')) {
-                fs.copyFileSync('src/offscreen.html', 'dist/offscreen.html');
-              }
-
-              // 5. Copy print HTML files to dist/
-              if (fs.existsSync('src/print.html')) {
-                fs.copyFileSync('src/print.html', 'dist/print.html');
-              }
-              
-              // 6. Copy JavaScript libraries for offscreen document
-              const libFiles = [
-                { src: 'node_modules/html2canvas/dist/html2canvas.min.js', dest: 'dist/html2canvas.min.js' }
+              const fileCopies = [
+                { src: 'src/manifest.json', dest: 'dist/manifest.json', log: '📄 Copied manifest.json from src/' },
+                { src: 'src/popup.html', dest: 'dist/popup.html' },
+                { src: 'src/offscreen.html', dest: 'dist/offscreen.html' },
+                { src: 'src/print.html', dest: 'dist/print.html' },
+                { src: 'node_modules/html2canvas/dist/html2canvas.min.js', dest: 'dist/html2canvas.min.js', log: '📄 Copied html2canvas library' }
               ];
-              
-              for (const { src, dest } of libFiles) {
-                if (fs.existsSync(src)) {
-                  const destDir = path.dirname(dest);
-                  if (!fs.existsSync(destDir)) {
-                    fs.mkdirSync(destDir, { recursive: true });
-                  }
-                  fs.copyFileSync(src, dest);
-                }
-              }
-              console.log('📄 Copied JavaScript libraries');
 
-              // 7. Copy locale files for i18n support
-              if (fs.existsSync('src/_locales')) {
-                copyDirectory('src/_locales', 'dist/_locales');
-                console.log('📄 Copied _locales/ directory');
-              }
-              
-              // 6. Fix KaTeX font paths in styles.css
+              fileCopies.push(...copyDirectory('icons', 'dist/icons'));
+              fileCopies.push(...copyDirectory('src/_locales', 'dist/_locales'));
+
+              fileCopies.forEach(({ src, dest, log }) => copyFileIfExists(src, dest, log));
+
+              // Fix KaTeX font paths in styles.css
               // esbuild bundles fonts to dist/ root with relative paths like ./KaTeX_*.woff2
               // We convert them to absolute Chrome extension URLs so they work in content scripts
               // __MSG_@@extension_id__ will be resolved by Chrome when CSS is injected
               const stylesCssSource = 'dist/styles.css';
-              
+
               if (fs.existsSync(stylesCssSource)) {
                 let stylesContent = fs.readFileSync(stylesCssSource, 'utf8');
                 stylesContent = stylesContent.replace(
-                  /url\("\.\/KaTeX_([^"]+)"\)/g, 
+                  /url\("\.\/KaTeX_([^"]+)"\)/g,
                   'url("chrome-extension://__MSG_@@extension_id__/KaTeX_$1")'
                 );
                 fs.writeFileSync(stylesCssSource, stylesContent);
                 console.log('📄 Fixed font paths in styles.css');
               }
-                            
+
               console.log('✅ Complete extension created in dist/');
               console.log('🎯 Ready for Chrome: chrome://extensions/ → Load unpacked → select dist/');
             } catch (error) {
