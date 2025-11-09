@@ -806,7 +806,7 @@ pie title 功能使用分布
 ### 7.7 扩展整体架构图
 
 
-<div style="width: 100%; max-width: 1600px; font-family: 'SimSun', 'Times New Roman', Times, serif; background: #fff; box-sizing: border-box; position: relative;">
+<div style="width: 1280px; font-family: 'SimSun', 'Times New Roman', Times, serif; box-sizing: border-box; position: relative;">
   <style scoped>
     .ext-arch-container { display: flex; gap: 15px; }
     .ext-wing-left { width: 200px; flex-shrink: 0; }

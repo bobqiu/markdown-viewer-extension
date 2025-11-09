@@ -22,6 +22,9 @@ window.addEventListener('unhandledrejection', (event) => {
 
 // Optimize canvas performance on page load
 document.addEventListener('DOMContentLoaded', () => {
+  document.documentElement.style.backgroundColor = 'transparent';
+  document.body.style.backgroundColor = 'transparent';
+
   const canvas = document.getElementById('png-canvas');
   if (canvas) {
     // Pre-initialize context with willReadFrequently for better performance
@@ -43,7 +46,8 @@ async function initializeMermaid() {
       lineHeight: 1.6,
       themeVariables: {
         fontSize: '12px',
-        fontFamily: "'SimSun', 'Times New Roman', Times, serif"
+        fontFamily: "'SimSun', 'Times New Roman', Times, serif",
+        background: 'transparent'
       },
       flowchart: {
         htmlLabels: true,
@@ -143,9 +147,9 @@ async function renderHtmlToPng(htmlContent, targetWidth = 1200) {
       throw new Error('html2canvas not loaded');
     }
 
-    const container = document.getElementById('html-container');
-    const normalizedTargetWidth = Number.isFinite(targetWidth) && targetWidth > 0 ? targetWidth : null;
-    container.style.cssText = 'display: inline-block; position: relative; background: white; padding: 0; margin: 0; width: auto;';
+  const container = document.getElementById('html-container');
+  const normalizedTargetWidth = Number.isFinite(targetWidth) && targetWidth > 0 ? targetWidth : null;
+  container.style.cssText = 'display: inline-block; position: relative; background: transparent; padding: 0; margin: 0; width: auto;';
     container.innerHTML = htmlContent;
 
     // Give the layout engine a tick in the offscreen document context
@@ -163,7 +167,7 @@ async function renderHtmlToPng(htmlContent, targetWidth = 1200) {
 
     // Use html2canvas to capture
     const canvas = await html2canvas(container, {
-      backgroundColor: '#ffffff',
+      backgroundColor: null,
       scale: 4,
       logging: false,
       useCORS: true,
@@ -189,8 +193,8 @@ async function renderHtmlToPng(htmlContent, targetWidth = 1200) {
     const base64Data = pngDataUrl.replace(/^data:image\/png;base64,/, '');
 
     // Cleanup
-    container.innerHTML = '';
-    container.style.cssText = 'display: block;';
+  container.innerHTML = '';
+  container.style.cssText = 'display: block; background: transparent;';
 
     return {
       base64: base64Data,
@@ -254,9 +258,9 @@ async function renderSvgToPng(svgContent) {
     canvas.style.height = height + 'px';
 
     const ctx = canvas.getContext('2d', { willReadFrequently: true });
-    ctx.scale(scale, scale);
-    ctx.fillStyle = 'white';
-    ctx.fillRect(0, 0, width, height);
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.setTransform(scale, 0, 0, scale, 0, 0);
 
     // Convert SVG to image
     const svgString = new XMLSerializer().serializeToString(svgEl);
@@ -304,7 +308,7 @@ async function renderSvgToPng(svgContent) {
       throw new Error('Invalid image dimensions: ' + img.naturalWidth + 'x' + img.naturalHeight);
     }
 
-    ctx.drawImage(img, 0, 0, width, height);
+  ctx.drawImage(img, 0, 0, width, height);
 
     // Enhanced content verification with pixel sampling
     const sampleRegions = [
@@ -354,7 +358,8 @@ async function renderSvgToPng(svgContent) {
     const base64Data = pngDataUrl.replace(/^data:image\/png;base64,/, '');
 
     // Cleanup
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
     container.innerHTML = '';
 
     return {
@@ -375,6 +380,10 @@ function preventTextClipping(svgContent) {
       /* The key fix: prevent foreignObject from clipping text */
       foreignObject {
         overflow: visible !important;
+      }
+
+      svg {
+        background: transparent !important;
       }
   `;
 
