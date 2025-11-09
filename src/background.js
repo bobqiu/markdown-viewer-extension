@@ -7,7 +7,9 @@ let globalCacheManager = null;
 // Store scroll positions in memory (per session)
 const scrollPositions = new Map();
 const printJobs = new Map();
+const uploadSessions = new Map();
 const PRINT_CHUNK_SIZE = 256 * 1024;
+const DEFAULT_UPLOAD_CHUNK_SIZE = 255 * 1024;
 
 // Initialize the global cache manager
 async function initGlobalCacheManager() {
@@ -97,29 +99,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true; // Keep message channel open for async response
   }
 
-  // Handle file download
-  if (message.type === 'DOWNLOAD_FILE') {
-    handleFileDownload(message, sendResponse);
-    return true; // Keep message channel open for async response
-  }
-
-  if (message.type === 'PRINT_DOCUMENT') {
-    handlePrintDocument(message, sender, sendResponse);
-    return true;
-  }
-
-  if (message.type === 'PRINT_JOB_INIT') {
-    handlePrintJobInit(message, sender, sendResponse);
-    return true;
-  }
-
-  if (message.type === 'PRINT_JOB_CHUNK') {
-    handlePrintJobChunk(message, sendResponse);
-    return true;
-  }
-
-  if (message.type === 'PRINT_JOB_FINALIZE') {
-    handlePrintJobFinalize(message, sendResponse);
+  if (message.type === 'PRINT_JOB_START') {
+    handlePrintJobStart(message, sender, sendResponse);
     return true;
   }
 
@@ -136,6 +117,29 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === 'PRINT_JOB_COMPLETE') {
     handlePrintJobComplete(message, sender, sendResponse);
     return true;
+  }
+
+  if (message.type === 'UPLOAD_INIT') {
+    handleUploadInit(message, sendResponse);
+    return;
+  }
+
+  if (message.type === 'UPLOAD_CHUNK') {
+    handleUploadChunk(message, sendResponse);
+    return;
+  }
+
+  if (message.type === 'UPLOAD_FINALIZE') {
+    handleUploadFinalize(message, sendResponse);
+    return;
+  }
+
+  if (message.type === 'UPLOAD_ABORT') {
+    handleUploadAbort(message);
+    return;
+  }
+  if (message.type === 'DOCX_DOWNLOAD_FINALIZE') {
+    return handleDocxDownloadFinalize(message, sendResponse);
   }
 });
 
@@ -284,28 +288,6 @@ async function handleFileRead(message, sendResponse) {
   }
 }
 
-async function handleFileDownload(message, sendResponse) {
-  try {
-    // Convert base64 to data URL
-    const dataUrl = `data:${message.mimeType};base64,${message.data}`;
-
-    // Use chrome.downloads API
-    chrome.downloads.download({
-      url: dataUrl,
-      filename: message.filename,
-      saveAs: true
-    }, (downloadId) => {
-      if (chrome.runtime.lastError) {
-        sendResponse({ error: chrome.runtime.lastError.message });
-      } else {
-        sendResponse({ downloadId: downloadId });
-      }
-    });
-  } catch (error) {
-    sendResponse({ error: error.message });
-  }
-}
-
 async function handleRenderingRequest(message, sendResponse) {
   try {
     // Ensure offscreen document exists
@@ -383,101 +365,6 @@ async function handleContentScriptInjection(tabId, sendResponse) {
   } catch (error) {
     sendResponse({ error: error.message });
   }
-}
-
-async function handlePrintDocument(message, sender, sendResponse) {
-  const payload = message?.payload || {};
-  const html = typeof payload.html === 'string' ? payload.html : '';
-  const title = typeof payload.title === 'string' && payload.title.trim() ? payload.title.trim() : 'Document';
-  const filename = typeof payload.filename === 'string' ? payload.filename : '';
-
-  const token = createPrintToken();
-  const job = {
-    html,
-    title,
-    filename,
-    createdAt: Date.now(),
-    sourceTabId: sender?.tab?.id ?? null,
-    tabId: null,
-    chunkSize: PRINT_CHUNK_SIZE
-  };
-
-  printJobs.set(token, job);
-
-  launchPrintTab(token, job, sendResponse);
-}
-
-function handlePrintJobInit(message, sender, sendResponse) {
-  const payload = message?.payload || {};
-  const title = typeof payload.title === 'string' && payload.title.trim() ? payload.title.trim() : 'Document';
-  const filename = typeof payload.filename === 'string' ? payload.filename : '';
-
-  const token = createPrintToken();
-  const job = {
-    html: '',
-    chunks: [],
-    title,
-    filename,
-    expectedSize: typeof payload.htmlLength === 'number' ? payload.htmlLength : null,
-    createdAt: Date.now(),
-    sourceTabId: sender?.tab?.id ?? null,
-    tabId: null
-  };
-
-  printJobs.set(token, job);
-  sendResponse({ success: true, token });
-}
-
-function handlePrintJobChunk(message, sendResponse) {
-  const token = message?.token;
-  const chunk = typeof message?.chunk === 'string' ? message.chunk : null;
-
-  if (!token || chunk === null) {
-    sendResponse({ error: 'Invalid print chunk payload' });
-    return;
-  }
-
-  const job = printJobs.get(token);
-  if (!job) {
-    sendResponse({ error: 'Print job not found' });
-    return;
-  }
-
-  if (!Array.isArray(job.chunks)) {
-    job.chunks = [];
-  }
-
-  job.chunks.push(chunk);
-  job.chunkBytes = (job.chunkBytes || 0) + chunk.length;
-  job.lastChunkTime = Date.now();
-
-  sendResponse({ success: true });
-}
-
-function handlePrintJobFinalize(message, sendResponse) {
-  const token = message?.token;
-  if (!token) {
-    sendResponse({ error: 'Missing print job token' });
-    return;
-  }
-
-  const job = printJobs.get(token);
-  if (!job) {
-    sendResponse({ error: 'Print job not found' });
-    return;
-  }
-
-  if (typeof job.html === 'string' && job.html.length > 0 && !Array.isArray(job.chunks)) {
-    launchPrintTab(token, job, sendResponse);
-    return;
-  }
-
-  const chunks = Array.isArray(job.chunks) ? job.chunks : [];
-  job.html = chunks.join('');
-  delete job.chunks;
-  job.chunkSize = PRINT_CHUNK_SIZE;
-
-  launchPrintTab(token, job, sendResponse);
 }
 
 async function launchPrintTab(token, job, sendResponse) {
@@ -600,4 +487,241 @@ function handlePrintJobFetchChunk(message, sendResponse) {
   const nextOffset = offset + chunk.length;
 
   sendResponse({ success: true, chunk, nextOffset });
+}
+
+function handlePrintJobStart(message, sender, sendResponse) {
+  const token = message?.token;
+  if (!token) {
+    sendResponse({ error: 'Missing print job token' });
+    return;
+  }
+
+  let session = uploadSessions.get(token);
+  if (!session) {
+    sendResponse({ error: 'Upload session not found' });
+    return;
+  }
+
+  try {
+    if (!session.completed) {
+      session = finalizeUploadSession(token);
+    }
+  } catch (error) {
+    sendResponse({ error: error.message });
+    return;
+  }
+
+  const payload = message?.payload || {};
+  const meta = session.metadata || {};
+  const html = typeof session.data === 'string'
+    ? session.data
+    : (Array.isArray(session.chunks) ? session.chunks.join('') : '');
+
+  const title = typeof payload.title === 'string' && payload.title.trim()
+    ? payload.title.trim()
+    : (typeof meta.title === 'string' && meta.title.trim() ? meta.title.trim() : 'Document');
+  const filename = typeof payload.filename === 'string'
+    ? payload.filename
+    : (typeof meta.filename === 'string' ? meta.filename : '');
+  const chunkSize = typeof session.chunkSize === 'number' && session.chunkSize > 0
+    ? session.chunkSize
+    : PRINT_CHUNK_SIZE;
+
+  const job = {
+    html,
+    title,
+    filename,
+    createdAt: Date.now(),
+    sourceTabId: sender?.tab?.id ?? null,
+    tabId: null,
+    chunkSize
+  };
+
+  printJobs.set(token, job);
+  uploadSessions.delete(token);
+
+  launchPrintTab(token, job, sendResponse);
+}
+
+function initUploadSession(purpose, options = {}) {
+  const {
+    chunkSize = DEFAULT_UPLOAD_CHUNK_SIZE,
+    encoding = 'text',
+    metadata = {},
+    expectedSize = null
+  } = options;
+
+  const token = createPrintToken();
+  uploadSessions.set(token, {
+    purpose,
+    encoding,
+    metadata,
+    expectedSize,
+    chunkSize,
+    chunks: [],
+    receivedBytes: 0,
+    createdAt: Date.now(),
+    completed: false
+  });
+
+  return { token, chunkSize };
+}
+
+function appendUploadChunk(token, chunk) {
+  const session = uploadSessions.get(token);
+  if (!session || session.completed) {
+    throw new Error('Upload session not found');
+  }
+
+  if (typeof chunk !== 'string') {
+    throw new Error('Invalid chunk payload');
+  }
+
+  if (!Array.isArray(session.chunks)) {
+    session.chunks = [];
+  }
+
+  session.chunks.push(chunk);
+
+  if (session.encoding === 'base64') {
+    session.receivedBytes = (session.receivedBytes || 0) + Math.floor(chunk.length * 3 / 4);
+  } else {
+    session.receivedBytes = (session.receivedBytes || 0) + chunk.length;
+  }
+
+  session.lastChunkTime = Date.now();
+}
+
+function finalizeUploadSession(token) {
+  const session = uploadSessions.get(token);
+  if (!session || session.completed) {
+    throw new Error('Upload session not found');
+  }
+
+  const chunks = Array.isArray(session.chunks) ? session.chunks : [];
+  const combined = chunks.join('');
+
+  session.data = combined;
+  session.chunks = null;
+  session.completed = true;
+  session.completedAt = Date.now();
+
+  return session;
+}
+
+function abortUploadSession(token) {
+  if (token && uploadSessions.has(token)) {
+    uploadSessions.delete(token);
+  }
+}
+
+function handleUploadInit(message, sendResponse) {
+  const payload = message?.payload || {};
+  const purpose = typeof payload.purpose === 'string' && payload.purpose.trim()
+    ? payload.purpose.trim()
+    : 'general';
+  const encoding = payload.encoding === 'base64' ? 'base64' : 'text';
+  const metadata = payload.metadata && typeof payload.metadata === 'object' ? payload.metadata : {};
+  const expectedSize = typeof payload.expectedSize === 'number' ? payload.expectedSize : null;
+  const requestedChunkSize = typeof payload.chunkSize === 'number' && payload.chunkSize > 0
+    ? payload.chunkSize
+    : DEFAULT_UPLOAD_CHUNK_SIZE;
+
+  try {
+    const { token, chunkSize } = initUploadSession(purpose, {
+      chunkSize: requestedChunkSize,
+      encoding,
+      expectedSize,
+      metadata
+    });
+
+    sendResponse({ success: true, token, chunkSize });
+  } catch (error) {
+    sendResponse({ error: error.message });
+  }
+}
+
+function handleUploadChunk(message, sendResponse) {
+  const token = message?.token;
+  const chunk = typeof message?.chunk === 'string' ? message.chunk : null;
+
+  if (!token || chunk === null) {
+    sendResponse({ error: 'Invalid upload chunk payload' });
+    return;
+  }
+
+  try {
+    appendUploadChunk(token, chunk);
+    sendResponse({ success: true });
+  } catch (error) {
+    sendResponse({ error: error.message });
+  }
+}
+
+function handleUploadFinalize(message, sendResponse) {
+  const token = message?.token;
+  if (!token) {
+    sendResponse({ error: 'Missing upload session token' });
+    return;
+  }
+
+  try {
+    const session = finalizeUploadSession(token);
+    sendResponse({
+      success: true,
+      token,
+      purpose: session.purpose,
+      bytes: session.receivedBytes,
+      encoding: session.encoding
+    });
+  } catch (error) {
+    sendResponse({ error: error.message });
+  }
+}
+
+function handleUploadAbort(message) {
+  const token = message?.token;
+  abortUploadSession(token);
+}
+
+function handleDocxDownloadFinalize(message, sendResponse) {
+  const token = message?.token;
+  if (!token) {
+    sendResponse({ error: 'Missing download job token' });
+    return false;
+  }
+
+  try {
+    let session = uploadSessions.get(token);
+    if (!session) {
+      sendResponse({ error: 'Download job not found' });
+      return false;
+    }
+
+    if (!session.completed) {
+      session = finalizeUploadSession(token);
+    }
+
+    const { metadata = {}, data = '' } = session;
+    const filename = metadata.filename || 'document.docx';
+    const mimeType = metadata.mimeType || 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+
+    const dataUrl = `data:${mimeType};base64,${data}`;
+    chrome.downloads.download({
+      url: dataUrl,
+      filename,
+      saveAs: true
+    }, (downloadId) => {
+      if (chrome.runtime.lastError) {
+        sendResponse({ error: chrome.runtime.lastError.message });
+      } else {
+        sendResponse({ success: true, downloadId });
+      }
+    });
+    uploadSessions.delete(token);
+    return true;
+  } catch (error) {
+    sendResponse({ error: error.message });
+    return false;
+  }
 }

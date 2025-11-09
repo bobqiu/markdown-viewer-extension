@@ -28,6 +28,7 @@ import remarkGfm from 'remark-gfm';
 import remarkBreaks from 'remark-breaks';
 import remarkMath from 'remark-math';
 import { visit } from 'unist-util-visit';
+import { uploadInChunks, abortUpload } from './upload-manager.js';
 
 /**
  * Main class for exporting Markdown to DOCX
@@ -1767,38 +1768,81 @@ class DocxExporter {
   /**
    * Download blob as file
    */
-  /**
-   * Download blob as file
-   */
   async downloadBlob(blob, filename) {
+    let token = null;
     try {
-      // Convert blob to base64 for transmission to background script
       const arrayBuffer = await blob.arrayBuffer();
       const bytes = new Uint8Array(arrayBuffer);
-      let binary = '';
-      for (let i = 0; i < bytes.byteLength; i++) {
-        binary += String.fromCharCode(bytes[i]);
-      }
-      const base64 = btoa(binary);
 
-      // Send to background script to handle download
-      chrome.runtime.sendMessage({
-        type: 'DOWNLOAD_FILE',
-        filename: filename,
-        data: base64,
-        mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
-      }, (response) => {
-        if (response && response.error) {
-          console.error('Download error:', response.error);
-          // Fallback to traditional method
-          this.fallbackDownload(blob, filename);
+      const uploadResult = await uploadInChunks({
+        sendMessage: (payload) => this.runtimeSendMessage(payload),
+        purpose: 'docx-download',
+        encoding: 'base64',
+        totalSize: bytes.length,
+        metadata: {
+          filename,
+          mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+        },
+        getChunk: (offset, size) => {
+          const end = Math.min(offset + size, bytes.length);
+          const chunkBytes = bytes.subarray(offset, end);
+          return this.encodeBytesToBase64(chunkBytes);
         }
       });
+
+      token = uploadResult.token;
+
+      const finalizeResponse = await this.runtimeSendMessage({
+        type: 'DOCX_DOWNLOAD_FINALIZE',
+        token
+      });
+
+      if (!finalizeResponse || !finalizeResponse.success) {
+        throw new Error(finalizeResponse?.error || 'Download finalize failed');
+      }
     } catch (error) {
       console.error('Download failed:', error);
-      // Try fallback method
+      if (token) {
+        abortUpload((payload) => this.runtimeSendMessage(payload), token);
+      }
       this.fallbackDownload(blob, filename);
     }
+  }
+
+  /**
+   * Convert byte array chunk to base64 without exceeding call stack limits
+   * @param {Uint8Array} bytes - Binary chunk
+   * @returns {string} Base64 encoded chunk
+   */
+  encodeBytesToBase64(bytes) {
+    let binary = '';
+    const sliceSize = 0x8000;
+    for (let i = 0; i < bytes.length; i += sliceSize) {
+      const slice = bytes.subarray(i, Math.min(i + sliceSize, bytes.length));
+      binary += String.fromCharCode.apply(null, slice);
+    }
+    return btoa(binary);
+  }
+
+  /**
+   * Wrapper for chrome.runtime.sendMessage with Promise interface
+   * @param {Object} message - Message payload
+   * @returns {Promise<any>} - Response from background script
+   */
+  runtimeSendMessage(message) {
+    return new Promise((resolve, reject) => {
+      try {
+        chrome.runtime.sendMessage(message, (response) => {
+          if (chrome.runtime.lastError) {
+            reject(new Error(chrome.runtime.lastError.message));
+            return;
+          }
+          resolve(response);
+        });
+      } catch (error) {
+        reject(error);
+      }
+    });
   }
 
   /**

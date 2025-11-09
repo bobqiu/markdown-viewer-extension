@@ -14,6 +14,7 @@ import ExtensionRenderer from './renderer.js';
 import ExtensionCacheManager from './cache-manager.js';
 import DocxExporter from './docx-exporter.js';
 import Localization, { DEFAULT_SETTING_LOCALE } from './localization.js';
+import { uploadInChunks, abortUpload } from './upload-manager.js';
 
 function initializeContentScript() {
 
@@ -831,50 +832,6 @@ ${truncatedMarkup}`;
   window.extensionRenderer = renderer;
   window.docxExporter = docxExporter;
 
-  // Listen for cache operations messages
-  chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-    // Handle cache operations
-    if (message.type === 'getCacheStats') {
-      if (window.extensionRenderer && window.extensionRenderer.cacheManager) {
-        window.extensionRenderer.cacheManager.getStats()
-          .then(stats => {
-            sendResponse(stats);
-          })
-          .catch(error => {
-            console.error('Failed to get cache stats:', error);
-            sendResponse({ error: error.message });
-          });
-        return true; // Keep message channel open
-      } else {
-        sendResponse({
-          itemCount: 0,
-          maxItems: 1000,
-          totalSize: 0,
-          totalSizeMB: '0.00',
-          items: []
-        });
-      }
-      return;
-    }
-
-    if (message.type === 'clearCache') {
-      if (window.extensionRenderer && window.extensionRenderer.cacheManager) {
-        window.extensionRenderer.cacheManager.clear()
-          .then(() => {
-            sendResponse({ success: true });
-          })
-          .catch(error => {
-            console.error('Failed to clear cache:', error);
-            sendResponse({ error: error.message });
-          });
-        return true; // Keep message channel open
-      } else {
-        sendResponse({ error: 'No cache manager available' });
-      }
-      return;
-    }
-  });
-
   // Since this script is only injected when content-detector.js confirms this is a markdown file,
   // we can directly proceed with processing
   // Get scroll position from background script (avoids sandbox restrictions)
@@ -1178,7 +1135,7 @@ ${truncatedMarkup}`;
     });
   }
 
-  const PRINT_CHUNK_SIZE = 256 * 1024; // 256 KB per message to stay under messaging limits
+  const PRINT_UPLOAD_CHUNK_SIZE = 256 * 1024;
 
   async function dispatchPrintJob(html, metadata = {}) {
     const htmlString = typeof html === 'string' ? html : '';
@@ -1189,47 +1146,62 @@ ${truncatedMarkup}`;
       return 'local-print';
     }
 
-    const initResponse = await chrome.runtime.sendMessage({
-      type: 'PRINT_JOB_INIT',
-      payload: {
-        title: metadata.title,
-        filename: metadata.filename,
-        htmlLength: totalLength
+    const sendMessage = (message) => new Promise((resolve, reject) => {
+      try {
+        chrome.runtime.sendMessage(message, (response) => {
+          if (chrome.runtime.lastError) {
+            reject(new Error(chrome.runtime.lastError.message));
+            return;
+          }
+          resolve(response);
+        });
+      } catch (error) {
+        reject(error);
       }
     });
 
-    if (!initResponse || !initResponse.success || !initResponse.token) {
-      const errorDetail = initResponse?.error ? `: ${initResponse.error}` : '';
-      throw new Error(`Failed to initiate print job${errorDetail}`);
-    }
+    const title = typeof metadata.title === 'string' ? metadata.title : undefined;
+    const filename = typeof metadata.filename === 'string' ? metadata.filename : undefined;
 
-    const token = initResponse.token;
+    let uploadToken = null;
 
-    for (let offset = 0; offset < totalLength; offset += PRINT_CHUNK_SIZE) {
-      const chunk = htmlString.slice(offset, offset + PRINT_CHUNK_SIZE);
-      const chunkResponse = await chrome.runtime.sendMessage({
-        type: 'PRINT_JOB_CHUNK',
-        token,
-        chunk
+    try {
+      const uploadResult = await uploadInChunks({
+        sendMessage,
+        purpose: 'print-html',
+        encoding: 'text',
+        totalSize: totalLength,
+        metadata: {
+          title: title || 'Document',
+          filename: filename || 'document.html'
+        },
+        requestedChunkSize: PRINT_UPLOAD_CHUNK_SIZE,
+        getChunk: (offset, size) => htmlString.slice(offset, offset + size)
       });
 
-      if (!chunkResponse || !chunkResponse.success) {
-        const errorDetail = chunkResponse?.error ? `: ${chunkResponse.error}` : '';
-        throw new Error(`Failed to send print data${errorDetail}`);
+      uploadToken = uploadResult.token;
+
+      const startResponse = await sendMessage({
+        type: 'PRINT_JOB_START',
+        token: uploadToken,
+        payload: {
+          title: title || 'Document',
+          filename: filename || 'document.html'
+        }
+      });
+
+      if (!startResponse || !startResponse.success) {
+        const errorDetail = startResponse?.error ? `: ${startResponse.error}` : '';
+        throw new Error(`Failed to start print job${errorDetail}`);
       }
+
+      return uploadToken;
+    } catch (error) {
+      if (uploadToken) {
+        abortUpload(sendMessage, uploadToken);
+      }
+      throw error;
     }
-
-    const finalizeResponse = await chrome.runtime.sendMessage({
-      type: 'PRINT_JOB_FINALIZE',
-      token
-    });
-
-    if (!finalizeResponse || !finalizeResponse.success) {
-      const errorDetail = finalizeResponse?.error ? `: ${finalizeResponse.error}` : '';
-      throw new Error(`Failed to finalize print job${errorDetail}`);
-    }
-
-    return token;
   }
 
   function initializeToolbar() {
